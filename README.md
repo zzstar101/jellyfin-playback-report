@@ -4,6 +4,14 @@
 
 自动统计 Jellyfin 媒体服务器的播放数据，生成精美的可视化海报。
 
+## 海报预览
+
+### 播放周榜
+![Weekly](./screenshots/weekly.png)
+
+### 年度观影报告
+![Annual](./screenshots/annual.png)
+
 ## 功能特性
 
 ### 📊 播放周榜 (Weekly Report)
