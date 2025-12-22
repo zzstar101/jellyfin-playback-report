@@ -161,12 +161,16 @@ def extract_series_name(item_name: str) -> str:
 
 
 def get_week_range():
-    """计算自然周"""
+    """计算上周的时间范围（周一早上运行，统计上周一到上周日）"""
     now = datetime.datetime.now(TIMEZONE)
     weekday = now.weekday()
-    week_start = (now - datetime.timedelta(days=weekday)).replace(
+    # 计算本周一
+    this_monday = (now - datetime.timedelta(days=weekday)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    # 上周一 = 本周一 - 7天
+    week_start = this_monday - datetime.timedelta(days=7)
+    # 上周日 = 上周一 + 6天
     week_end = (week_start + datetime.timedelta(days=6)).replace(
         hour=23, minute=59, second=59, microsecond=999999
     )
