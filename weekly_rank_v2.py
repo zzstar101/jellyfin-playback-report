@@ -160,6 +160,48 @@ def extract_series_name(item_name: str) -> str:
     return item_name.strip()
 
 
+def is_anime_series(series_name, genres, tags):
+    """
+    判断是否为番剧
+    1. 优先检查 Genres/Tags 中是否包含动画相关标签
+    2. 其次检查名称中是否包含常见番剧关键词
+    3. 默认为电视剧
+    """
+    # 检查 Genres/Tags
+    anime_tags = ["Animation", "Anime", "动画", "番剧"]
+    if any(tag in genres + tags for tag in anime_tags):
+        return True
+    
+    # 常见番剧关键词（日本动画特有的标识）
+    anime_keywords = [
+        "无职转生",  # 日本轻小说改编
+        "刀剑神域",  # 经典番剧
+        "进击的巨人",
+        "鬼灭之刃",
+        "咨询师",  # Re:从零开始
+        "魔法少女",
+        "圣斗士",
+        "火影忍者",
+        "海贼王",
+        "龙珠",
+        "死神",
+        "妖精的尾巴",
+        "全职高手",  # 国产动画
+        "一拳超人",
+        "东京喰种",
+        "夏目友人帐",
+        "元气少女",
+        "缘结神",
+    ]
+    
+    # 检查名称匹配
+    for keyword in anime_keywords:
+        if keyword in series_name:
+            return True
+    
+    return False
+
+
 def get_week_range():
     """计算上周的时间范围（周一早上运行，统计上周一到上周日）"""
     now = datetime.datetime.now(TIMEZONE)
@@ -302,21 +344,29 @@ def get_week_data():
                     genres = item_data.get("Genres", [])
                     tags = item_data.get("Tags", [])
                     
-                    is_anime = any(g in ["Animation", "Anime", "动画", "番剧"] for g in genres + tags)
-                    
-                    if is_anime:
+                    # 使用增强的分类函数
+                    if is_anime_series(series_name, genres, tags):
                         anime_list.append({**data, "SeriesId": series_id})
                     else:
                         tv_shows_list.append({**data, "SeriesId": series_id})
                 else:
-                    # API 请求失败，默认归为电视剧
-                    tv_shows_list.append({**data, "SeriesId": series_id})
+                    # API 请求失败，使用名称匹配
+                    if is_anime_series(series_name, [], []):
+                        anime_list.append({**data, "SeriesId": series_id})
+                    else:
+                        tv_shows_list.append({**data, "SeriesId": series_id})
             except:
-                # 异常情况默认归为电视剧
-                tv_shows_list.append({**data, "SeriesId": series_id})
+                # 异常情况使用名称匹配
+                if is_anime_series(series_name, [], []):
+                    anime_list.append({**data, "SeriesId": series_id})
+                else:
+                    tv_shows_list.append({**data, "SeriesId": series_id})
         else:
-            # 搜索不到的默认归为电视剧
-            tv_shows_list.append(data)
+            # 搜索不到使用名称匹配
+            if is_anime_series(series_name, [], []):
+                anime_list.append(data)
+            else:
+                tv_shows_list.append(data)
 
     tv_shows = sorted(tv_shows_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
     anime = sorted(anime_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
