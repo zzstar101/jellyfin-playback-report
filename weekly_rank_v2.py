@@ -160,21 +160,19 @@ def extract_series_name(item_name: str) -> str:
     return item_name.strip()
 
 
-def classify_by_path(path):
+# 媒体库父项 ID（用于分类判断，通过本地分析获取）
+# 运行 analyze_series.py 获取你的 Jellyfin 媒体库 ParentId
+LIBRARY_ANIME = "YOUR_ANIME_LIBRARY_PARENT_ID"     # 番剧库 ParentId
+LIBRARY_TV = "YOUR_TV_LIBRARY_PARENT_ID"           # 电视剧库 ParentId
+
+
+def classify_by_parent_id(parent_id):
     """
-    通过媒体库路径判断剧集类型
-    根据你的 Jellyfin 媒体库路径修改：
-    - 路径包含 '番剧' 或 'anime' → 番剧
-    - 路径包含 '电视剧' 或 'tvshow' → 电视剧
-    - 默认为电视剧
+    通过媒体库 ParentId 判断剧集类型
     """
-    if not path:
-        return "tv"
-    
-    path_lower = path.lower()
-    if "番剧" in path or "anime" in path_lower:
+    if parent_id == LIBRARY_ANIME:
         return "anime"
-    elif "电视剧" in path or "tvshow" in path_lower:
+    elif parent_id == LIBRARY_TV:
         return "tv"
     else:
         return "tv"  # 默认为电视剧
@@ -201,10 +199,10 @@ def get_week_range():
     return week_start, week_end, week_start_str, week_end_str
 
 
-def search_jellyfin_item(name, item_type="Series", with_path=False):
+def search_jellyfin_item(name, item_type="Series", with_parent=False):
     """
     通过名称搜索 Jellyfin 媒体项
-    with_path=True 时返回 (id, path) 元组
+    with_parent=True 时返回 (id, parent_id) 元组
     """
     try:
         url = f"{JELLYFIN_URL}/Items"
@@ -213,7 +211,7 @@ def search_jellyfin_item(name, item_type="Series", with_path=False):
             "IncludeItemTypes": item_type,
             "Recursive": "true",
             "Limit": 1,
-            "Fields": "Path" if with_path else ""
+            "Fields": "ParentId" if with_parent else ""
         }
         headers = {"X-Emby-Token": JELLYFIN_API_KEY}
         
@@ -223,12 +221,12 @@ def search_jellyfin_item(name, item_type="Series", with_path=False):
             items = data.get("Items", [])
             if items:
                 item = items[0]
-                if with_path:
-                    return item.get("Id"), item.get("Path", "")
+                if with_parent:
+                    return item.get("Id"), item.get("ParentId", "")
                 return item.get("Id")
     except:
         pass
-    return (None, "") if with_path else None
+    return (None, "") if with_parent else None
 
 
 def jellyfin_poster(item_id):
@@ -311,18 +309,18 @@ def get_week_data():
         series_data[series_name]["cnt"] += r["cnt"]
         series_data[series_name]["dur"] += r["dur"]
 
-    # 通过 Jellyfin API 分类（根据媒体库路径判断）
+    # 通过 Jellyfin API 分类（根据媒体库 ParentId 判断）
     print("  → 分类剧集（电视剧/番剧）...")
     tv_shows_list = []
     anime_list = []
     
     for series_name, data in series_data.items():
-        # 搜索剧集并获取路径
-        result = search_jellyfin_item(series_name, "Series", with_path=True)
-        series_id, path = result if result else (None, "")
+        # 搜索剧集并获取 ParentId
+        result = search_jellyfin_item(series_name, "Series", with_parent=True)
+        series_id, parent_id = result if result else (None, "")
         
-        # 根据路径分类
-        category = classify_by_path(path)
+        # 根据 ParentId 分类
+        category = classify_by_parent_id(parent_id)
         
         if series_id:
             if category == "anime":
