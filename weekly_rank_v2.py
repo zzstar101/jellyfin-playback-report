@@ -192,6 +192,8 @@ def is_anime_series(series_name, genres, tags):
         "夏目友人帐",
         "元气少女",
         "缘结神",
+        "银魂",  # 3年Z组银八老师
+        "银八",
     ]
     
     # 检查名称匹配
