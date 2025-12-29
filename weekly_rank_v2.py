@@ -309,11 +309,14 @@ def get_week_data():
                     else:
                         tv_shows_list.append({**data, "SeriesId": series_id})
                 else:
-                    anime_list.append({**data, "SeriesId": series_id})
+                    # API 请求失败，默认归为电视剧
+                    tv_shows_list.append({**data, "SeriesId": series_id})
             except:
-                anime_list.append({**data, "SeriesId": series_id})
+                # 异常情况默认归为电视剧
+                tv_shows_list.append({**data, "SeriesId": series_id})
         else:
-            anime_list.append(data)
+            # 搜索不到的默认归为电视剧
+            tv_shows_list.append(data)
 
     tv_shows = sorted(tv_shows_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
     anime = sorted(anime_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
