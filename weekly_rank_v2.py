@@ -160,48 +160,24 @@ def extract_series_name(item_name: str) -> str:
     return item_name.strip()
 
 
-def is_anime_series(series_name, genres, tags):
+def classify_by_path(path):
     """
-    判断是否为番剧
-    1. 优先检查 Genres/Tags 中是否包含动画相关标签
-    2. 其次检查名称中是否包含常见番剧关键词
-    3. 默认为电视剧
+    通过媒体库路径判断剧集类型
+    根据你的 Jellyfin 媒体库路径修改：
+    - 路径包含 '番剧' 或 'anime' → 番剧
+    - 路径包含 '电视剧' 或 'tvshow' → 电视剧
+    - 默认为电视剧
     """
-    # 检查 Genres/Tags
-    anime_tags = ["Animation", "Anime", "动画", "番剧"]
-    if any(tag in genres + tags for tag in anime_tags):
-        return True
+    if not path:
+        return "tv"
     
-    # 常见番剧关键词（日本动画特有的标识）
-    anime_keywords = [
-        "无职转生",  # 日本轻小说改编
-        "刀剑神域",  # 经典番剧
-        "进击的巨人",
-        "鬼灭之刃",
-        "咨询师",  # Re:从零开始
-        "魔法少女",
-        "圣斗士",
-        "火影忍者",
-        "海贼王",
-        "龙珠",
-        "死神",
-        "妖精的尾巴",
-        "全职高手",  # 国产动画
-        "一拳超人",
-        "东京喰种",
-        "夏目友人帐",
-        "元气少女",
-        "缘结神",
-        "银魂",  # 3年Z组银八老师
-        "银八",
-    ]
-    
-    # 检查名称匹配
-    for keyword in anime_keywords:
-        if keyword in series_name:
-            return True
-    
-    return False
+    path_lower = path.lower()
+    if "番剧" in path or "anime" in path_lower:
+        return "anime"
+    elif "电视剧" in path or "tvshow" in path_lower:
+        return "tv"
+    else:
+        return "tv"  # 默认为电视剧
 
 
 def get_week_range():
@@ -225,15 +201,19 @@ def get_week_range():
     return week_start, week_end, week_start_str, week_end_str
 
 
-def search_jellyfin_item(name, item_type="Series"):
-    """通过名称搜索 Jellyfin 媒体项"""
+def search_jellyfin_item(name, item_type="Series", with_path=False):
+    """
+    通过名称搜索 Jellyfin 媒体项
+    with_path=True 时返回 (id, path) 元组
+    """
     try:
         url = f"{JELLYFIN_URL}/Items"
         params = {
             "searchTerm": name,
             "IncludeItemTypes": item_type,
             "Recursive": "true",
-            "Limit": 1
+            "Limit": 1,
+            "Fields": "Path" if with_path else ""
         }
         headers = {"X-Emby-Token": JELLYFIN_API_KEY}
         
@@ -242,10 +222,13 @@ def search_jellyfin_item(name, item_type="Series"):
             data = r.json()
             items = data.get("Items", [])
             if items:
-                return items[0].get("Id")
+                item = items[0]
+                if with_path:
+                    return item.get("Id"), item.get("Path", "")
+                return item.get("Id")
     except:
         pass
-    return None
+    return (None, "") if with_path else None
 
 
 def jellyfin_poster(item_id):
@@ -328,47 +311,27 @@ def get_week_data():
         series_data[series_name]["cnt"] += r["cnt"]
         series_data[series_name]["dur"] += r["dur"]
 
-    # 通过 Jellyfin API 分类
+    # 通过 Jellyfin API 分类（根据媒体库路径判断）
     print("  → 分类剧集（电视剧/番剧）...")
     tv_shows_list = []
     anime_list = []
     
     for series_name, data in series_data.items():
-        series_id = search_jellyfin_item(series_name, "Series")
+        # 搜索剧集并获取路径
+        result = search_jellyfin_item(series_name, "Series", with_path=True)
+        series_id, path = result if result else (None, "")
+        
+        # 根据路径分类
+        category = classify_by_path(path)
         
         if series_id:
-            try:
-                url = f"{JELLYFIN_URL}/Items/{series_id}"
-                headers = {"X-Emby-Token": JELLYFIN_API_KEY}
-                r = requests.get(url, headers=headers, timeout=10)
-                if r.status_code == 200:
-                    item_data = r.json()
-                    genres = item_data.get("Genres", [])
-                    tags = item_data.get("Tags", [])
-                    
-                    # 使用增强的分类函数
-                    if is_anime_series(series_name, genres, tags):
-                        anime_list.append({**data, "SeriesId": series_id})
-                    else:
-                        tv_shows_list.append({**data, "SeriesId": series_id})
-                else:
-                    # API 请求失败，使用名称匹配
-                    if is_anime_series(series_name, [], []):
-                        anime_list.append({**data, "SeriesId": series_id})
-                    else:
-                        tv_shows_list.append({**data, "SeriesId": series_id})
-            except:
-                # 异常情况使用名称匹配
-                if is_anime_series(series_name, [], []):
-                    anime_list.append({**data, "SeriesId": series_id})
-                else:
-                    tv_shows_list.append({**data, "SeriesId": series_id})
-        else:
-            # 搜索不到使用名称匹配
-            if is_anime_series(series_name, [], []):
-                anime_list.append(data)
+            if category == "anime":
+                anime_list.append({**data, "SeriesId": series_id})
             else:
-                tv_shows_list.append(data)
+                tv_shows_list.append({**data, "SeriesId": series_id})
+        else:
+            # 搜索不到，默认为电视剧
+            tv_shows_list.append(data)
 
     tv_shows = sorted(tv_shows_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
     anime = sorted(anime_list, key=lambda x: (x["dur"], x["cnt"]), reverse=True)[:TOP_N]
