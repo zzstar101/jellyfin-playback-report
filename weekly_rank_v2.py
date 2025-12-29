@@ -605,12 +605,14 @@ def main():
     
     ensure_dirs()
     
-    if not os.path.exists(DB_PATH):
-        if not fetch_database():
-            print("\n⚠️  数据库拉取失败")
+    # 拉取数据库（每次都重新拉取以获取最新数据）
+    print("\n📥 正在获取最新播放数据...")
+    if not fetch_database():
+        print("\n⚠️  数据库拉取失败，尝试使用缓存数据")
+        if not os.path.exists(DB_PATH):
+            print("❌ 缓存数据也不存在，无法继续")
             return
-    else:
-        print(f"ℹ️  使用缓存数据库: {DB_PATH}")
+        print("ℹ️  使用缓存数据库")
     
     movies, tv_shows, anime, top_user, week_start_str, week_end_str = get_week_data()
     
