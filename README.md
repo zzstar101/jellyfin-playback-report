@@ -9,9 +9,6 @@
 ### 播放周榜 V3（含订阅日历）
 ![Weekly V3](./screenshots/weekly_v3.png)
 
-### 播放周榜 V2
-![Weekly](./screenshots/weekly.png)
-
 ### 年度观影报告
 ![Annual](./screenshots/annual.png)
 
