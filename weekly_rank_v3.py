@@ -5,13 +5,12 @@ Jellyfin 播放周榜 V3（含订阅日历）
 - 统计本周片王
 - 本周放送日历（来自 MoviePilot 订阅）
 - 全新海报设计
-
-GitHub: https://github.com/zzstar101/jellyfin-playback-report
 """
 
 import sqlite3
 import requests
 import datetime
+import subprocess
 import os
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -27,47 +26,46 @@ except ImportError:
     HAS_PARAMIKO = False
 
 # =========================
-# 🔧 配置区（请修改为你的配置）
+# 配置区
 # =========================
 
-# NAS SSH 配置（用于拉取播放记录数据库）
-NAS_HOST = "YOUR_NAS_HOST"           # NAS 地址
-NAS_PORT = 22                         # SSH 端口
-NAS_USER = "YOUR_NAS_USER"           # SSH 用户名
-NAS_PASSWORD = "YOUR_NAS_PASSWORD"   # SSH 密码
-NAS_DB_PATH = "/path/to/playback_reporting.db"  # 数据库路径
+# NAS SSH 配置
+NAS_HOST = "nas.nerv-base.com"
+NAS_PORT = 22
+NAS_USER = "zzstar"
+NAS_PASSWORD = "Zhan061207"
+NAS_DB_PATH = "/volume1/docker/jellyfin/config/data/playback_reporting.db"
 
 # 本地数据库缓存
 DB_CACHE_DIR = "./cache"
 DB_PATH = f"{DB_CACHE_DIR}/playback_reporting.db"
 
 # Jellyfin 服务器
-JELLYFIN_URL = "https://your-jellyfin-server.com"
-JELLYFIN_API_KEY = "YOUR_JELLYFIN_API_KEY"
+JELLYFIN_URL = "https://jellyfin.nerv-base.com"
+JELLYFIN_API_KEY = "742c4c287fe94690913290bc84d39db1"
 
-# MoviePilot 配置（用于订阅日历功能）
-MOVIEPILOT_URL = "https://your-moviepilot-server.com"
-MOVIEPILOT_API_TOKEN = "YOUR_MOVIEPILOT_API_TOKEN"
-MOVIEPILOT_USERNAME = "YOUR_MOVIEPILOT_USERNAME"
-MOVIEPILOT_PASSWORD = "YOUR_MOVIEPILOT_PASSWORD"
+# MoviePilot 配置
+MOVIEPILOT_URL = "https://mp.nerv-base.com"
+MOVIEPILOT_API_TOKEN = "NewSecureKey_2025_XYZ789"
+MOVIEPILOT_USERNAME = "admin"
+MOVIEPILOT_PASSWORD = "admin123"
 
-# Server 酱推送（可选）
-SERVERCHAN_KEY = "YOUR_SERVERCHAN_KEY"
+# Server 酱
+SERVERCHAN_KEY = "SCT302181TX4Ms0Nxj1k6Hg15wyAiivU65"
 
-# Lsky 图床（可选）
-LSKY_URL = "https://your-lsky-server.com"
-LSKY_TOKEN = "YOUR_LSKY_TOKEN"
+# Lsky 图床
+LSKY_URL = "https://img.nerv-base.com"
+LSKY_TOKEN = "1|Gi3s3p5vkzfD74A8N1SIkdhqFUrWPrWHHu1E8HWu"
 
 # 站点名称
-SITE_NAME = "YOUR_SITE_NAME"
+SITE_NAME = "NERV-BASE"
 
 # 榜单配置
 TOP_N = 3
 
-# 媒体库父项 ID（用于区分番剧和电视剧）
-# 请替换为你的 Jellyfin 媒体库 ID
-LIBRARY_ANIME = "YOUR_ANIME_LIBRARY_ID"
-LIBRARY_TV = "YOUR_TV_LIBRARY_ID"
+# 媒体库父项 ID
+LIBRARY_ANIME = "7dd48b4cf954f687df24682cfc5ce9f7"
+LIBRARY_TV = "3f3929b48afa16be4dd97fb4e178c796"
 
 # 时区
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=8))
@@ -75,13 +73,10 @@ TIMEZONE = datetime.timezone(datetime.timedelta(hours=8))
 # 海报输出目录
 POSTER_DIR = "./posters"
 
-# 字体（请根据系统修改）
-# Windows: "C:/Windows/Fonts/msyh.ttc"
-# Linux: "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
-# macOS: "/System/Library/Fonts/PingFang.ttc"
+# 字体
 FONT_PATH = "C:/Windows/Fonts/msyh.ttc"
 
-# 是否启用推送
+# 是否启用推送（测试时设为 False）
 ENABLE_PUSH = True
 
 
@@ -140,6 +135,18 @@ class MoviePilotClient:
         except:
             pass
         return []
+    
+    def get_movie_info(self, tmdbid: int) -> Optional[Dict]:
+        """获取电影信息"""
+        try:
+            # 使用 media 接口获取电影信息
+            url = f"{self.base_url}/api/v1/media/tmdb:{tmdbid}?type_name=%E7%94%B5%E5%BD%B1"
+            resp = requests.get(url, headers=self._get_auth_headers(), timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+        except:
+            pass
+        return None
 
 
 def get_weekly_calendar() -> List[Dict]:
@@ -170,38 +177,55 @@ def get_weekly_calendar() -> List[Dict]:
     )
     week_end = week_start + datetime.timedelta(days=6, hours=23, minutes=59, seconds=59)
     
-    # 收集本周剧集
+    # 收集本周剧集和电影
     calendar = defaultdict(list)
     
     for sub in subscriptions:
-        if sub.get('type') != '电视剧':
-            continue
-        
         tmdbid = sub.get('tmdbid')
-        season = sub.get('season', 1)
         name = sub.get('name')
         poster = sub.get('poster')
+        season = sub.get('season')
         
-        episodes = client.get_episodes(tmdbid, season)
-        
-        for ep in episodes:
-            air_date_str = ep.get('air_date')
-            if air_date_str:
-                try:
-                    air_date = datetime.datetime.strptime(air_date_str, '%Y-%m-%d')
-                    air_date = air_date.replace(tzinfo=TIMEZONE)
-                    
-                    if week_start.date() <= air_date.date() <= week_end.date():
-                        calendar[air_date_str].append({
-                            'name': name,
-                            'season': season,
-                            'episode': ep.get('episode_number'),
-                            'title': ep.get('name'),
-                            'poster': poster,
-                            'weekday': air_date.weekday(),
-                        })
-                except ValueError:
-                    pass
+        # 有 season 字段的是电视剧，获取剧集信息
+        if season:
+            episodes = client.get_episodes(tmdbid, season)
+            for ep in episodes:
+                air_date_str = ep.get('air_date')
+                if air_date_str:
+                    try:
+                        air_date = datetime.datetime.strptime(air_date_str, '%Y-%m-%d')
+                        air_date = air_date.replace(tzinfo=TIMEZONE)
+                        
+                        if week_start.date() <= air_date.date() <= week_end.date():
+                            calendar[air_date_str].append({
+                                'name': name,
+                                'season': season,
+                                'episode': ep.get('episode_number'),
+                                'title': ep.get('name'),
+                                'poster': poster,
+                                'weekday': air_date.weekday(),
+                            })
+                    except ValueError:
+                        pass
+        else:
+            # 没有 season 字段的是电影，获取电影信息
+            movie_info = client.get_movie_info(tmdbid)
+            if movie_info:
+                release_date = movie_info.get('release_date')
+                if release_date:
+                    try:
+                        release_dt = datetime.datetime.strptime(release_date, '%Y-%m-%d')
+                        release_dt = release_dt.replace(tzinfo=TIMEZONE)
+                        
+                        if week_start.date() <= release_dt.date() <= week_end.date():
+                            calendar[release_date].append({
+                                'name': name,
+                                'title': movie_info.get('title', name),
+                                'poster': poster,
+                                'weekday': release_dt.weekday(),
+                            })
+                    except ValueError:
+                        pass
     
     # 转换为列表格式
     result = []
@@ -374,20 +398,6 @@ def jellyfin_poster(item_id):
     return None
 
 
-def fetch_tmdb_poster(poster_path_str: str) -> Optional[Image.Image]:
-    """从 TMDB 获取海报图片"""
-    if not poster_path_str:
-        return None
-    try:
-        url = f"https://image.tmdb.org/t/p/w200{poster_path_str}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            return Image.open(BytesIO(resp.content))
-    except:
-        pass
-    return None
-
-
 def add_rounded_corners(img, radius):
     """为图片添加圆角"""
     mask = Image.new('L', img.size, 0)
@@ -519,6 +529,21 @@ def get_poster_filename(week_end_str):
     return f"{POSTER_DIR}/weekly-poster-{week_end_str}.png"
 
 
+def fetch_tmdb_poster(poster_path_str: str) -> Optional[Image.Image]:
+    """从 TMDB 获取海报图片"""
+    if not poster_path_str:
+        return None
+    try:
+        # TMDB 海报 URL
+        url = f"https://image.tmdb.org/t/p/w200{poster_path_str}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            return Image.open(BytesIO(resp.content))
+    except:
+        pass
+    return None
+
+
 def draw_poster_v3(movies, tv_shows, anime, top_user, calendar, poster_path):
     """
     生成播放周榜海报 V3
@@ -549,27 +574,19 @@ def draw_poster_v3(movies, tv_shows, anime, top_user, calendar, poster_path):
     col_title_h = 45
     card_area_h = 3 * card_h + 2 * card_gap
     
-    # 日历区域参数（横向7列）
+    # 日历区域参数（横向平铺）
     calendar_title_h = 60
-    cal_day_width = (W - margin_x * 2) // 7  # 7天等宽
-    # 封面尺寸为周榜卡片的一半（面积四分之一）
-    cal_poster_w = card_w // 2  # 约156px
-    cal_poster_h = card_h // 2  # 约219px
-    cal_item_h = cal_poster_h + 50  # 单个剧集卡片高度（封面+文字）
-    cal_item_gap = 15
-    cal_date_h = 45  # 日期标题高度
+    cal_item_w = 140  # 单个剧集卡片宽度
+    cal_item_h = 240  # 单个剧集卡片高度（海报+文字）
+    cal_poster_w = 120  # 海报宽度
+    cal_poster_h = 180  # 海报高度
+    cal_item_gap = 15  # 卡片间距
+    cal_date_w = 80  # 日期标签宽度
+    cal_row_gap = 25  # 行间距
     
-    # 计算日历区域最大高度（找出最多剧集的一天）
-    max_eps_per_day = 0
-    if calendar:
-        # 构建完整7天数据
-        cal_by_weekday = {i: [] for i in range(7)}
-        for day in calendar:
-            cal_by_weekday[day['weekday_idx']] = day['episodes']
-        max_eps_per_day = max(len(eps) for eps in cal_by_weekday.values()) if cal_by_weekday else 0
-    max_eps_per_day = max(max_eps_per_day, 1)  # 至少1行
-    
-    calendar_area_h = calendar_title_h + cal_date_h + max_eps_per_day * (cal_item_h + cal_item_gap) + 20
+    # 计算日历区域高度（每天一行）
+    calendar_rows = len([d for d in calendar if d['episodes']]) if calendar else 0
+    calendar_area_h = calendar_title_h + calendar_rows * (cal_item_h + cal_row_gap) + 30
     
     footer_h = 70
     content_padding = 30
@@ -600,21 +617,21 @@ def draw_poster_v3(movies, tv_shows, anime, top_user, calendar, poster_path):
         draw.line((0, y, W, y), fill=(r, g, b))
 
     # === 字体 ===
-    title_font = ImageFont.truetype(FONT_PATH.replace("msyh", "msyhbd"), 36)
-    sub_font = ImageFont.truetype(FONT_PATH, 14)
-    col_title_font = ImageFont.truetype(FONT_PATH.replace("msyh", "msyhbd"), 16)
-    col_sub_font = ImageFont.truetype(FONT_PATH, 11)
-    rank_font = ImageFont.truetype(FONT_PATH, 12)
-    empty_font = ImageFont.truetype(FONT_PATH, 12)
-    brand_font = ImageFont.truetype(FONT_PATH, 12)
-    name_font = ImageFont.truetype(FONT_PATH, 11)
+    title_font = ImageFont.truetype("C:/Windows/Fonts/msyhbd.ttc", 36)
+    sub_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 14)
+    col_title_font = ImageFont.truetype("C:/Windows/Fonts/msyhbd.ttc", 16)
+    col_sub_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 11)
+    rank_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 12)
+    empty_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 12)
+    brand_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 12)
+    name_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 11)
     
     # 日历字体
-    cal_title_font = ImageFont.truetype(FONT_PATH.replace("msyh", "msyhbd"), 20)
-    cal_date_font = ImageFont.truetype(FONT_PATH.replace("msyh", "msyhbd"), 18)
-    cal_name_font = ImageFont.truetype(FONT_PATH, 12)
-    cal_ep_font = ImageFont.truetype(FONT_PATH, 11)
-    cal_empty_font = ImageFont.truetype(FONT_PATH, 11)
+    cal_title_font = ImageFont.truetype("C:/Windows/Fonts/msyhbd.ttc", 20)
+    cal_date_font = ImageFont.truetype("C:/Windows/Fonts/msyhbd.ttc", 18)
+    cal_name_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 12)
+    cal_ep_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 11)
+    cal_empty_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 11)
 
     # === 颜色系统 ===
     text_primary = (60, 60, 65)
@@ -673,7 +690,7 @@ def draw_poster_v3(movies, tv_shows, anime, top_user, calendar, poster_path):
                     rounded_card = add_rounded_corners(card, card_radius)
                     img.paste(rounded_card, (col_x, card_y), rounded_card)
                     
-                    placeholder_font = ImageFont.truetype(FONT_PATH, 14)
+                    placeholder_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 14)
                     name = item["Name"]
                     max_chars = 12
                     if len(name) > max_chars:
@@ -710,101 +727,84 @@ def draw_poster_v3(movies, tv_shows, anime, top_user, calendar, poster_path):
                     hint_y = card_y + card_h // 2 - 8
                     draw.text((hint_x, hint_y), hint, fill=empty_text, font=empty_font)
 
-    # === 日历区域（横向7列布局）===
+    # === 日历区域（横向平铺布局）===
     calendar_y = content_y + col_title_h + card_area_h + content_padding + section_gap
     
     # 日历标题
     draw.text((margin_x, calendar_y), "本周放送", fill=text_primary, font=cal_title_font)
     draw.text((margin_x + 80, calendar_y + 3), "This Week's Airing", fill=text_tertiary, font=col_sub_font)
     
-    # 构建完整7天数据（周一到周日）
-    now = datetime.datetime.now(TIMEZONE)
-    weekday_now = now.weekday()
-    week_start = now - datetime.timedelta(days=weekday_now)
+    # 开始绘制各天的剧集（横向平铺）
+    current_y = calendar_y + calendar_title_h
     
-    cal_by_weekday = {i: [] for i in range(7)}
     for day in calendar:
-        cal_by_weekday[day['weekday_idx']] = day['episodes']
-    
-    # 日历内容起始位置
-    cal_content_y = calendar_y + calendar_title_h
-    
-    # 绘制7列
-    weekday_names = ['一', '二', '三', '四', '五', '六', '日']
-    
-    for day_idx in range(7):
-        col_x = margin_x + day_idx * cal_day_width
-        day_date = week_start + datetime.timedelta(days=day_idx)
-        day_str = f"{day_date.day}日"
+        episodes = day['episodes']
+        if not episodes:
+            continue
         
-        # 日期标题（居中）
-        bbox = cal_date_font.getbbox(day_str)
-        date_w = bbox[2] - bbox[0]
-        date_x = col_x + (cal_day_width - date_w) // 2
-        draw.text((date_x, cal_content_y), day_str, fill=text_primary, font=cal_date_font)
+        # 日期标签（左侧）
+        date_str = f"{day['date'][5:]}\n{day['weekday']}"
+        date_lines = date_str.split('\n')
+        date_y = current_y + 10
+        for line in date_lines:
+            bbox = cal_date_font.getbbox(line)
+            line_w = bbox[2] - bbox[0]
+            line_x = margin_x + (cal_date_w - line_w) // 2
+            draw.text((line_x, date_y), line, fill=text_primary, font=cal_date_font)
+            date_y += 25
         
-        # 该日剧集
-        episodes = cal_by_weekday[day_idx]
-        items_y = cal_content_y + cal_date_h
+        # 剧集横向排列（从日期标签右侧开始）
+        items_x = margin_x + cal_date_w + 20
+        max_items_per_row = (W - items_x - margin_x) // (cal_item_w + cal_item_gap)
         
-        if episodes:
-            for ep_idx, ep in enumerate(episodes[:3]):  # 最多显示3个
-                ep_y = items_y + ep_idx * (cal_item_h + cal_item_gap)
-                
-                # 获取海报
-                poster_img = fetch_tmdb_poster(ep.get('poster'))
-                
-                # 卡片位置（居中）
-                card_x = col_x + (cal_day_width - cal_poster_w) // 2
-                
-                if poster_img:
-                    poster_img = poster_img.resize((cal_poster_w, cal_poster_h), Image.Resampling.LANCZOS)
-                    rounded_poster = add_rounded_corners(poster_img, 6)
-                    img.paste(rounded_poster, (card_x, ep_y), rounded_poster)
-                else:
-                    # 占位背景
-                    placeholder = Image.new('RGBA', (cal_poster_w, cal_poster_h), (*cal_card_bg, 255))
-                    rounded_placeholder = add_rounded_corners(placeholder, 6)
-                    img.paste(rounded_placeholder, (card_x, ep_y), rounded_placeholder)
-                
-                # 剧名（居中，截断）
-                ep_name = ep['name']
-                max_name_chars = 8
-                if len(ep_name) > max_name_chars:
-                    ep_name = ep_name[:max_name_chars] + ".."
-                
-                bbox = cal_name_font.getbbox(ep_name)
-                name_w = bbox[2] - bbox[0]
-                name_x = col_x + (cal_day_width - name_w) // 2
-                name_y = ep_y + cal_poster_h + 2
-                draw.text((name_x, name_y), ep_name, fill=text_primary, font=cal_name_font)
-                
-                # 季号集数（居中）
+        for ep_idx, ep in enumerate(episodes[:max_items_per_row]):  # 最多一行
+            ep_x = items_x + ep_idx * (cal_item_w + cal_item_gap)
+            
+            # 获取海报
+            poster_img = fetch_tmdb_poster(ep.get('poster'))
+            
+            # 海报居中位置
+            poster_x = ep_x + (cal_item_w - cal_poster_w) // 2
+            
+            if poster_img:
+                poster_img = poster_img.resize((cal_poster_w, cal_poster_h), Image.Resampling.LANCZOS)
+                rounded_poster = add_rounded_corners(poster_img, 6)
+                img.paste(rounded_poster, (poster_x, current_y), rounded_poster)
+            else:
+                # 占位背景
+                placeholder = Image.new('RGBA', (cal_poster_w, cal_poster_h), (220, 220, 225, 255))
+                rounded_placeholder = add_rounded_corners(placeholder, 6)
+                img.paste(rounded_placeholder, (poster_x, current_y), rounded_placeholder)
+            
+            # 剧名（居中，截断）
+            ep_name = ep['name']
+            max_name_chars = 10
+            if len(ep_name) > max_name_chars:
+                ep_name = ep_name[:max_name_chars] + ".."
+            
+            bbox = cal_name_font.getbbox(ep_name)
+            name_w = bbox[2] - bbox[0]
+            name_x = ep_x + (cal_item_w - name_w) // 2
+            name_y = current_y + cal_poster_h + 5
+            draw.text((name_x, name_y), ep_name, fill=text_primary, font=cal_name_font)
+            
+            # 如果有季号集数则显示（电视剧）
+            if 'season' in ep and 'episode' in ep:
                 ep_info = f"S{ep['season']}E{ep['episode']}"
                 bbox = cal_ep_font.getbbox(ep_info)
                 info_w = bbox[2] - bbox[0]
-                info_x = col_x + (cal_day_width - info_w) // 2
-                info_y = name_y + 14
+                info_x = ep_x + (cal_item_w - info_w) // 2
+                info_y = name_y + 18
                 draw.text((info_x, info_y), ep_info, fill=text_secondary, font=cal_ep_font)
-            
-            # 如果超过3个，显示 +N
-            if len(episodes) > 3:
-                more_text = f"+{len(episodes) - 3}"
-                bbox = cal_ep_font.getbbox(more_text)
-                more_w = bbox[2] - bbox[0]
-                more_x = col_x + (cal_day_width - more_w) // 2
-                more_y = items_y + 3 * (cal_item_h + cal_item_gap) - cal_item_gap
-                draw.text((more_x, more_y), more_text, fill=text_tertiary, font=cal_ep_font)
-        else:
-            # 没有剧集
-            empty_text_lines = ["今日无", "待播剧集"]
-            line_y = items_y + 20
-            for line in empty_text_lines:
-                bbox = cal_empty_font.getbbox(line)
-                line_w = bbox[2] - bbox[0]
-                line_x = col_x + (cal_day_width - line_w) // 2
-                draw.text((line_x, line_y), line, fill=text_tertiary, font=cal_empty_font)
-                line_y += 14
+        
+        # 如果超过显示数量，显示 +N
+        if len(episodes) > max_items_per_row:
+            more_x = items_x + max_items_per_row * (cal_item_w + cal_item_gap)
+            more_y = current_y + cal_item_h // 2
+            more_text = f"+{len(episodes) - max_items_per_row}"
+            draw.text((more_x, more_y), more_text, fill=text_tertiary, font=cal_ep_font)
+        
+        current_y += cal_item_h + cal_row_gap
 
     # === Footer ===
     footer_y = H - footer_h + 10
@@ -899,7 +899,10 @@ def build_text(movies, tv_shows, anime, top_user, calendar, week_start_str, week
         for day in calendar[:7]:
             lines.append(f"{day['date'][5:]} {day['weekday']}:\n")
             for ep in day['episodes'][:4]:
-                lines.append(f"  - {ep['name']} S{ep['season']}E{ep['episode']}\n")
+                if 'season' in ep and 'episode' in ep:
+                    lines.append(f"  - {ep['name']} S{ep['season']}E{ep['episode']}\n")
+                else:
+                    lines.append(f"  - {ep['name']} [电影]\n")
             if len(day['episodes']) > 4:
                 lines.append(f"  ... 还有 {len(day['episodes']) - 4} 部\n")
             lines.append("\n")
