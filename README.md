@@ -46,22 +46,19 @@ git clone https://github.com/zzstar101/jellyfin-playback-report.git
 cd jellyfin-playback-report
 
 # 安装依赖
-pip install pillow requests paramiko
+pip install pillow requests
 ```
 
 ## 配置
 
 编辑脚本中的配置区：
+也可以先复制环境变量模板：`cp .env.example .env`（Windows 可手动复制文件）。
 
 ### weekly_rank_v3.py（推荐）
 
 ```python
-# NAS SSH 配置（用于拉取 Jellyfin 播放记录数据库）
-NAS_HOST = "YOUR_NAS_HOST"
-NAS_PORT = 22
-NAS_USER = "YOUR_NAS_USER"
-NAS_PASSWORD = "YOUR_NAS_PASSWORD"
-NAS_DB_PATH = "/path/to/playback_reporting.db"
+# 数据库路径（直连）
+DB_PATH = "/path/to/playback_reporting.db"
 
 # Jellyfin 服务器
 JELLYFIN_URL = "https://your-jellyfin-server.com"
@@ -91,12 +88,8 @@ LSKY_TOKEN = "YOUR_LSKY_TOKEN"
 ### weekly_rank_v2.py
 
 ```python
-# NAS SSH 配置（用于拉取 Jellyfin 播放记录数据库）
-NAS_HOST = "YOUR_NAS_HOST"
-NAS_PORT = 22
-NAS_USER = "YOUR_NAS_USER"
-NAS_PASSWORD = "YOUR_NAS_PASSWORD"
-NAS_DB_PATH = "/path/to/playback_reporting.db"
+# 数据库路径（直连）
+DB_PATH = "/path/to/playback_reporting.db"
 
 # Jellyfin 服务器
 JELLYFIN_URL = "https://your-jellyfin-server.com"
@@ -133,6 +126,16 @@ SITE_NAME = "YOUR_SITE_NAME"
 
 - **Windows**: `C:/Windows/Fonts/msyh.ttc`
 - **Linux**: `/usr/share/fonts/truetype/wqy/wqy-microhei.ttc`
+
+## Docker 部署（NAS）
+
+项目根目录提供 Dockerfile 与 docker-compose.yml。
+
+1. 复制 .env.example 为 .env 并填写参数
+2. 修改 docker-compose.yml 中的数据库与输出目录挂载路径
+3. 执行 docker compose build && docker compose up -d
+
+默认容器内 cron 已启用（每周一 10:00），可通过环境变量 CRON_ENABLED/CRON_SCHEDULE 调整。
 
 ## 使用
 
@@ -194,7 +197,7 @@ V3 版本支持从 [MoviePilot](https://github.com/jxxghp/MoviePilot) 获取订�
 - Python 3.8+
 - Pillow (图像处理)
 - requests (HTTP 请求)
-- paramiko (SSH 连接，可选)
+- paramiko (可选，仅在需要 SSH 拉库时)
 
 ## License
 
